@@ -1,7 +1,6 @@
 use std::fmt::Debug;
 use std::mem::{size_of_val, MaybeUninit};
 use std::os::windows::ffi::OsStrExt;
-use std::process::exit;
 use std::ptr::null;
 use proc_mem::ProcMemError;
 use winapi;

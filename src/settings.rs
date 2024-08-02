@@ -2,7 +2,7 @@
 use config::{Config, ConfigError, File};
 use serde::{Deserialize, Deserializer, Serialize};
 use strum::EnumString;
-use std::{default, env, fs, path::PathBuf};
+use std::{env, fs, path::PathBuf};
 use locale_config::Locale;
 use std::str::FromStr;
 

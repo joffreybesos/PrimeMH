@@ -2,7 +2,6 @@ use std::collections::HashMap;
 
 use notan::draw::*;
 use notan::prelude::*;
-use syn::Local;
 
 use crate::localisation::localisation::Localisation;
 use crate::mapgeneration::jsondata::LevelData;

@@ -2,7 +2,7 @@ use notan::egui::{self, *};
 use notan::math::{Mat3, Vec2};
 use notan::prelude::*;
 use notan::{draw::*, extra};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::time::{Duration, SystemTime};
 
 use winapi::um::winuser::{
@@ -12,7 +12,6 @@ use winapi::um::winuser::{
 
 use crate::gui::draw_map::draw_map;
 use crate::gui::Fonts;
-use crate::localisation;
 use crate::localisation::localisation::{load_localisation_data, Localisation};
 use crate::mapgeneration::blacha::is_blacha_ok;
 use crate::memory::gamedata;
@@ -27,6 +26,7 @@ use winapi::shared::windef::{HWND, POINT};
 
 use super::draw_lines::draw_lines;
 use super::draw_objects::draw_objects;
+use super::draw_player_history::draw_player_history;
 use super::draw_presets::draw_presets;
 use super::draw_units::draw_units;
 use super::images;
@@ -125,6 +125,7 @@ fn init(gfx: &mut Graphics) -> State {
         },
         egui_hovering: false,
         relative_mouse_pos: (0, 0),
+        player_pos_history: HashSet::new(),
         launch_time: SystemTime::now(),
         localisation,
     }
@@ -143,6 +144,7 @@ pub(crate) struct State {
     egui_rect: Rect,
     egui_hovering: bool,
     relative_mouse_pos: (i32, i32),
+    player_pos_history: HashSet<(u32, u32)>,
     launch_time: SystemTime,
     localisation: Localisation,
 }
@@ -161,13 +163,20 @@ fn update(app: &mut App, state: &mut State) {
             log::info!("Using D2LoD path {}", &state.settings.general.d2lodpath.as_os_str().to_string_lossy());
             state.seed_data = mapgeneration::seeddata::generate_seed_data(&game_data.seed_values, &state.settings);
         }
+        
         state.last_seed = game_data.seed_values.map_seed;
+        let xval = game_data.player.pos_x as u32;
+        let yval = game_data.player.pos_y as u32;
         state.game_data = Some(game_data);
+        
+        state.player_pos_history.insert((xval, yval));
     } else {
+        state.player_pos_history.clear();
         state.game_data = None;
     }
 
     if state.settings.general.overlay_mode {
+        // keep overlay aligned with game window
         let d2r_window = state.d2rprocess.get_window_info();
         app.window().set_size(d2r_window.width as u32, d2r_window.height as u32);
         app.window().set_position(d2r_window.x, d2r_window.y);
@@ -323,17 +332,8 @@ fn draw(app: &mut App, gfx: &mut Graphics, plugins: &mut Plugins, state: &mut St
                                     );
 
                                 draw.transform().pop();
-                                draw_presets(
-                                    &mut draw,
-                                    this_level,
-                                    &state.fonts.exocet_font,
-                                    game_data,
-                                    &state.settings,
-                                    &state.images,
-                                    &width,
-                                    &height,
-                                    &state.localisation,
-                                );
+                                draw_player_history((game_data.player.pos_x, game_data.player.pos_y), &state.player_pos_history, &mut draw, scale, &width, &height);
+                                draw_presets(&mut draw, this_level, &state.fonts.exocet_font, game_data, &state.settings, &state.images, &width, &height, &state.localisation);
                                 draw_lines(&mut draw, this_level, game_data, &state.settings, &width, &height);
                             }
                         }

@@ -8,8 +8,6 @@ use std::{fs::File, io::Write};
 use gui::ui::start_ui;
 use logger::configure_logging;
 
-use crate::localisation::localisation::{load_localisation_data, LocalisationEntry};
-
 mod gui;
 mod localisation;
 mod mapgeneration;

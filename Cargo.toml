@@ -1,6 +1,6 @@
 [package]
 name = "PrimeMH"
-version = "0.1.3"
+version = "0.1.4"
 author = ["joffreybesos"]
 edition = "2021"
 
@@ -38,7 +38,7 @@ env_logger = "0.10.0"
 # notan = { git = "https://github.com/joffreybesos/notan", branch = "rusty", features = ["extra", "egui", "text"] }
 notan = {version = "0.12.0", features = ["extra", "egui", "text"] }
 # notan = { path ="E:/Dev/notan-0.9.5", features = ["extra", "egui", "text"] }
-locale_config = "0.3.0"
+locale_config = "*"
 
 csv = "1.1"
 sapi-lite = "0.1.1"

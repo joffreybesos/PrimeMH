@@ -3,6 +3,7 @@ use notan::text::Font;
 mod draw_lines;
 mod draw_map;
 mod draw_objects;
+mod draw_player_history;
 mod draw_presets;
 mod draw_units;
 mod images;
