@@ -404,6 +404,25 @@ pub fn create_language_select_ui(app: &mut App, ctx: &Context, state: &mut State
     });
 }
 
+pub fn create_d2r_instance_picker_ui(app: &mut App, ctx: &Context, state: &mut State) {
+    setup_custom_fonts(ctx);
+    
+    ctx.set_pixels_per_point(app.window().dpi() as f32);
+    egui::Window::new("Choose your D2R instance").default_open(true).collapsible(false).resizable(false).fixed_size((640.0, 800.0)).show(ctx, |ui| {
+        ui.vertical_centered_justified(|ui| {
+            let font_size = 20.0;
+            if ui.button(egui::RichText::new("English").size(font_size)).clicked() { change_language(state, Locales::enUS)} 
+            if ui.button(egui::RichText::new("Deutsch").size(font_size)).clicked() { change_language(state, Locales::deDE)}
+            if ui.button(egui::RichText::new("한국어").size(font_size)).clicked() { change_language(state, Locales::koKR)}
+            if ui.button(egui::RichText::new("臺灣話").size(font_size)).clicked() { change_language(state, Locales::zhTW)}
+            if ui.button(egui::RichText::new("español").size(font_size)).clicked() { change_language(state, Locales::esES)}
+            if ui.button(egui::RichText::new("français").size(font_size)).clicked() { change_language(state, Locales::frFR)}
+            if ui.button(egui::RichText::new("italiano").size(font_size)).clicked() { change_language(state, Locales::itIT)}
+            if ui.button(egui::RichText::new("polski").size(font_size)).clicked() { change_language(state, Locales::plPL)}
+        });
+    });
+}
+
 
 fn setup_custom_fonts(ctx: &egui::Context) {
     let mut fonts = egui::FontDefinitions::default();

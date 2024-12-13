@@ -80,7 +80,7 @@ impl GameData {
 }
 
 
-pub fn get_last_game_name(d2rprocess: &D2RInstance) -> String {
+pub fn _get_last_game_name(d2rprocess: &D2RInstance) -> String {
     let last_game_arr = d2rprocess.read_mem_offset::<[u8; 15]>(d2rprocess.offsets.last_game_name);
     let mut game_name = d2rprocess.parse_arr_to_string(&last_game_arr);
 

