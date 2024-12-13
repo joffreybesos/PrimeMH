@@ -2,7 +2,6 @@ use std::fmt::Debug;
 use std::mem::{size_of_val, MaybeUninit};
 use std::os::windows::ffi::OsStrExt;
 use std::ptr::null;
-use std::os::windows::process::CommandExt;
 use std::any::type_name;
 use proc_mem::ProcMemError;
 use winapi;
@@ -15,7 +14,10 @@ use winapi::um::psapi::{EnumProcessModules, GetModuleBaseNameA};
 use winapi::um::winuser::{ClientToScreen, FindWindowW, GetClientRect, GetDpiForWindow, GetForegroundWindow};
 use winapi::um::{processthreadsapi::OpenProcess, winnt::PROCESS_ALL_ACCESS};
 
+use crate::memory::multiinstance::get_d2r_instances;
 use crate::LOCALISATION;
+
+use super::multiinstance::tasklist;
 
 #[allow(dead_code)]
 pub struct D2RInstance {
@@ -54,7 +56,7 @@ impl D2RInstance {
         log::info!("pid {}", pid);
         if pid == 0 { // use title if no pid
             let title_pid = Self::match_title(title.clone());
-            log::info!("Using D2R window title to identify D2R Instance, PID: {} Title: '{}'", title_pid, title);
+            log::info!("Using D2R window title to identify D2R Instance, Title: '{}'", title);
             return Self::open(title, title_pid)
         } else {
             let new_title: String = Self::match_pid(pid.clone());
@@ -67,7 +69,7 @@ impl D2RInstance {
         let handle: HANDLE = unsafe { OpenProcess(PROCESS_ALL_ACCESS, FALSE, pid) };
         if handle == NULL {
             log::debug!("OpenProcess failed. Error: {:?}", std::io::Error::last_os_error());
-            let d2r_list = Self::get_d2r_instances();
+            let d2r_list = get_d2r_instances();
             let localisation = LOCALISATION.lock().unwrap();
             let msg = format!("PID {} '{}' {}\n\n{}\n\n{}", pid, title, localisation.get_primemh("error12"), d2r_list, std::io::Error::last_os_error());
             panic!("{}", msg);
@@ -268,7 +270,7 @@ impl D2RInstance {
 
     pub fn is_running(&self) {
         if Self::match_pid(self.pid.clone()).len() == 0 {
-            let d2r_list = Self::get_d2r_instances();
+            let d2r_list = get_d2r_instances();
             let localisation = LOCALISATION.lock().unwrap();
             let msg = format!("{} '{}' {}\n\n{}", self.pid.clone(), self.title.clone(), localisation.get_primemh("error14"), d2r_list);
             log::debug!("D2R no longer running {}", msg);
@@ -276,25 +278,10 @@ impl D2RInstance {
         }
     }
 
-    pub fn tasklist() -> String {
-        let output = if cfg!(target_os = "windows") {
-            std::process::Command::new("tasklist")
-                .creation_flags(0x08000000)
-                .args(&["/fi", "IMAGENAME eq D2R.exe", "/v", "/FO", "CSV"])
-                .output()
-                .expect("failed to execute process")
-        } else {
-            std::process::Command::new("sh")
-                .arg("-c")
-                .arg("echo Todo!")
-                .output()
-                .expect("failed to execute process")
-        };
-        String::from_utf8_lossy(&output.stdout).to_string()
-    }
+    
 
     pub fn match_title(title: String) -> u32 {
-        let task_list: String = Self::tasklist();
+        let task_list: String = tasklist();
         let mut rdr = csv::Reader::from_reader(task_list.as_bytes());
         for result in rdr.records() {
             let record = match result {
@@ -310,7 +297,7 @@ impl D2RInstance {
     }
 
     pub fn match_pid(pid: u32) -> String {
-        let task_list: String = Self::tasklist();
+        let task_list: String = tasklist();
         let mut rdr = csv::Reader::from_reader(task_list.as_bytes());
         for result in rdr.records() {
             let record = match result {
@@ -323,28 +310,6 @@ impl D2RInstance {
             }
         }
         String::new()
-    }
-
-    pub fn get_d2r_instances() -> String {
-        let task_list: String = Self::tasklist();
-        let mut rdr = csv::Reader::from_reader(task_list.as_bytes());
-        let mut d2r_list: Vec<String> = vec![];
-        for result in rdr.records() {
-            let record = match result {
-                Ok(it) => it,
-                Err(_) => todo!(),
-            };
-            
-            let pid = record[1].parse::<u32>().unwrap();
-            let title = record[8].parse::<String>().unwrap();
-            d2r_list.push(format!("{}: '{}'", pid, title));
-            
-        }
-        if d2r_list.len() > 0 {
-            d2r_list.insert(0, String::from("D2R Instances currently running:"));
-            return d2r_list.join("\n");
-        }
-        return String::new()
     }
 
     pub fn read_mem<T: Default + Debug>(&self, address: u64) -> T {

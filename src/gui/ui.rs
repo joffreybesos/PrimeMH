@@ -17,8 +17,7 @@ use winapi::um::winuser::{
 use crate::gui::draw_map::draw_map;
 use crate::gui::Fonts;
 use crate::mapgeneration::blacha::is_blacha_ok;
-use crate::memory::gamedata;
-use crate::memory::multiinstance::detect_multiple_instances;
+use crate::memory::multiinstance::{detect_multiple_instances, D2RInstanceDetails};
 use crate::memory::process::D2RWindowArea;
 use crate::settings::MapPosition;
 use crate::types::item_filter::ItemFilters;
@@ -122,7 +121,7 @@ fn init(gfx: &mut Graphics) -> State {
         let msg = format!("\n\n{}", localisation.get_primemh("error12"));
         log::debug!("D2R not running! {}", msg);
         panic!("{}", msg);
-    } else if d2rinstances.len() == 1 {
+    } else if d2rinstances.len() == 2 {
         d2rprocess = Some(D2RInstance::open_d2r(settings.general.d2r_pid.clone(), settings.general.title.clone()));
     }
 
@@ -164,6 +163,7 @@ fn init(gfx: &mut Graphics) -> State {
 
     State {
         d2rprocess,
+        d2rinstances,
         settings,
         seed_data,
         last_seed: 0,
@@ -193,6 +193,7 @@ fn init(gfx: &mut Graphics) -> State {
 #[derive(AppState)]
 pub(crate) struct State {
     pub d2rprocess: Option<D2RInstance>,
+    pub d2rinstances: Vec<D2RInstanceDetails>,
     pub settings: Settings,
     pub seed_data: SeedData,
     pub last_seed: u32,
@@ -584,28 +585,19 @@ fn draw(app: &mut App, gfx: &mut Graphics, plugins: &mut Plugins, state: &mut St
                 draw.clear(Color::TRANSPARENT);
                 gfx.render(&draw);
             }
-        },
+        },  
         None => {
-            log::debug!("draw stuff");
-            let mut draw = gfx.create_draw();
-            draw.text(&state.fonts.blizzard_font, &String::from("asdfasdfasdfasdf"))
-                        .position(app.window().width() as f32 * 0.5, app.window().height() as f32 * 0.1)
-                        .size(52.0)
-                        .color(Color::from_hex(0xC6B276FF))
-                        .h_align_center()
-                        .v_align_top();
-            draw.clear(Color::TRANSPARENT);    
-
+            if app.window().size().0 == 10 && app.window().size().1 == 10 {
+                app.window().set_size(1024, 800);
+                app.window().set_position(100, 100);
+                app.window().set_mouse_passthrough(false);
+            }
             let mut output = plugins.egui(|ctx| {
-                
-                create_language_select_ui(app, ctx, state);
-                    
+                create_d2r_instance_picker_ui(app, ctx, state);
                 state.egui_rect = ctx.used_rect();
             });
             output.clear_color(Color::TRANSPARENT);
-            
             gfx.render(&output);
-            gfx.render(&draw);
         },
     }
 }

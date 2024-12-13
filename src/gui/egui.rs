@@ -406,20 +406,41 @@ pub fn create_language_select_ui(app: &mut App, ctx: &Context, state: &mut State
 
 pub fn create_d2r_instance_picker_ui(app: &mut App, ctx: &Context, state: &mut State) {
     setup_custom_fonts(ctx);
+    let font_size = 10.0;
+    let mut localisation = LOCALISATION.lock().unwrap();
     
+    if localisation.current_locale != state.settings.general.language {
+        localisation.update_locale(state.settings.general.language.clone());
+    }
     ctx.set_pixels_per_point(app.window().dpi() as f32);
-    egui::Window::new("Choose your D2R instance").default_open(true).collapsible(false).resizable(false).fixed_size((640.0, 800.0)).show(ctx, |ui| {
-        ui.vertical_centered_justified(|ui| {
-            let font_size = 20.0;
-            if ui.button(egui::RichText::new("English").size(font_size)).clicked() { change_language(state, Locales::enUS)} 
-            if ui.button(egui::RichText::new("Deutsch").size(font_size)).clicked() { change_language(state, Locales::deDE)}
-            if ui.button(egui::RichText::new("한국어").size(font_size)).clicked() { change_language(state, Locales::koKR)}
-            if ui.button(egui::RichText::new("臺灣話").size(font_size)).clicked() { change_language(state, Locales::zhTW)}
-            if ui.button(egui::RichText::new("español").size(font_size)).clicked() { change_language(state, Locales::esES)}
-            if ui.button(egui::RichText::new("français").size(font_size)).clicked() { change_language(state, Locales::frFR)}
-            if ui.button(egui::RichText::new("italiano").size(font_size)).clicked() { change_language(state, Locales::itIT)}
-            if ui.button(egui::RichText::new("polski").size(font_size)).clicked() { change_language(state, Locales::plPL)}
-        });
+    egui::Window::new("Choose your D2R instance").default_open(true).collapsible(false).resizable(false).fixed_size((800.0, 800.0)).show(ctx, |ui| {
+        egui::Grid::new("instance_picker")
+                .num_columns(4)
+                .spacing([20.0, 6.0])
+                .striped(true)
+                .show(ui, |ui| {
+                    ui.label(egui::RichText::new("").size(font_size));
+                    ui.label(egui::RichText::new("PID").size(font_size));
+                    ui.label(egui::RichText::new("Window Title").size(font_size));
+                    ui.label(egui::RichText::new("Position").size(font_size));
+                    ui.end_row();
+
+                    state.d2rinstances.iter().for_each(|d2r| {
+                        if ui.button(egui::RichText::new("Select").size(font_size)).clicked() { } 
+                        ui.label(egui::RichText::new(&d2r.pid.to_string()).size(font_size));
+                        ui.label(egui::RichText::new(&d2r.title).size(font_size));
+                        ui.label(egui::RichText::new("200,200").size(font_size));
+                        ui.end_row();
+                    });
+
+                    
+                });
+                ui.separator();
+                ui.horizontal(|ui| {
+                    if ui.button(localisation.get_primemh("quit")).clicked() {
+                        app.exit();
+                    }
+                });
     });
 }
 
