@@ -21,6 +21,10 @@ Bone Visage:
 
 Spired Helm:
   - quality: [unique] # Nightwing's Veil
+    stats:
+      - All Skills > 1
+      - AllResist < 20
+    ethereal: false
 
 Corona:
   - quality: [unique] # Crown of Ages

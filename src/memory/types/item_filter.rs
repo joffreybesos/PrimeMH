@@ -1,4 +1,5 @@
 use crate::{ITEM_FILTER_FILE, LOCALISATION};
+use regex::Regex;
 use serde::{de, Deserialize, Deserializer};
 use serde_yaml::Error;
 use std::{collections::HashMap, fs::File, path::Path, str::FromStr};
@@ -68,6 +69,7 @@ pub struct ItemFilter {
     pub play_sound_on_drop: Option<PlaySound>,
     pub sockets: Option<Vec<u8>>,
     pub identified: Option<bool>,
+    pub stats: Option<Vec<FilterStat>>,
 }
 
 impl<'de> Deserialize<'de> for Quality {
@@ -128,4 +130,60 @@ impl<'de> Deserialize<'de> for PlaySound {
             }
         }
     }
+}
+
+
+
+#[derive(Clone, PartialEq, Debug)]
+pub struct FilterStat {
+    pub stat: String,
+    pub operator: String,
+    pub value: i16,
+}
+
+impl<'de> Deserialize<'de> for FilterStat {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let original: String = String::deserialize(deserializer)?;
+        let re = Regex::new(r"^(.*?)\s*([<>])\s*(\d+)$").unwrap();
+
+        match re.captures(&original) {
+            Some(caps) => {
+                // Extract the stat, operator, and value from the regex captures
+                let stat = caps.get(1).unwrap().as_str().trim();
+                let operator = caps.get(2).unwrap().as_str();
+                let value: i16 = caps.get(3).unwrap().as_str().parse().unwrap();
+
+                log::info!("Stat: '{}', Operator: '{}', Value: {}", stat, operator, value);
+                return Ok(FilterStat {
+                    stat: stat.to_string(),
+                    operator: operator.to_string(),
+                    value,
+                });
+            },
+            None => {
+                return Err(de::Error::custom(format!("Invalid item stat filter : '{}'", original)));
+            }
+        }
+    }
+}
+
+pub enum FilterStats {
+    Defense,
+    Durability,
+    Level,
+    Strength,
+    Dexterity,
+    Energy,
+    Vitality,
+    RequiredLevel,
+    RequiredStrength,
+    RequiredDexterity,
+    RequiredEnergy,
+    RequiredVitality,
+    EnhancedDefense,
+    EnhancedDamage,
+    EnhancedDamagePercent,
 }
