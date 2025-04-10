@@ -1,4 +1,5 @@
 use chrono::{DateTime, Local, NaiveDate};
+use log::LevelFilter;
 use notan::egui::{self, *};
 use notan::math::{Mat3, Vec2};
 use notan::prelude::*;
@@ -223,6 +224,11 @@ pub(crate) struct State {
 }
 
 fn update(app: &mut App, state: &mut State) {
+    if state.settings.general.disable_log {
+        log::set_max_level(LevelFilter::Off);
+    } else {
+        log::set_max_level(LevelFilter::Debug);
+    }
     state.d2rprocess = state.d2rinstances.iter().find(|instance| instance.is_window_active(app.window().id())).cloned();
     
     

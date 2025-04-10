@@ -353,6 +353,8 @@ pub struct General {
     pub overlay_mode: bool,
     #[serde(default)]
     pub language: Locales,
+    #[serde(default)]
+    pub disable_log: bool,
 }
 
 impl Default for General {
@@ -369,6 +371,7 @@ impl Default for General {
             high_dpi: true,
             overlay_mode: true,
             language: Locales::enUS,
+            disable_log: false,
         }
     }
 }

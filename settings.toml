@@ -10,6 +10,7 @@ vsync = true
 high_dpi = true
 overlay_mode = true
 language = "enUS"
+disable_log = false
 
 [visual]
 scale = 3.3
