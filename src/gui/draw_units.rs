@@ -324,7 +324,7 @@ fn draw_boss(npc: &NPCUnit, player_pos: (f32, f32), draw: &mut Draw, settings: &
                 let hp_percent = health as f32 / max_health as f32;
                 let boss_text: String = format!("{:?}", npc.txt_file_no);
                 let npc_label: String = localisation.get_npc_name(&boss_text);
-                draw_health_bar(npc_pos, size.1, hp_percent, npc_label, draw, settings, font);
+                draw_health_bar(npc_pos, size.1, hp_percent, npc_label, draw, settings, 0.0, font);
             },
             None => (),
         }
@@ -374,19 +374,20 @@ fn draw_npc_name(
         .v_align_middle();
 }
 
-fn draw_health_bar(
+pub fn draw_health_bar(
     npc_pos: (f32, f32),
     size: f32,
     hp_percent: f32,
     text: String,
     draw: &mut Draw,
     settings: &Settings,
+    vertical_offset: f32,
     font: &Font
 ) {
     let font_size = 4.5;
     // draw boss health bar
     let scale = settings.visual.scale;
-    let health_bar_pos = (npc_pos.0, npc_pos.1 - (size * scale));
+    let health_bar_pos = (npc_pos.0, npc_pos.1 - (size * scale) - vertical_offset);
 
     draw.text(font, &text)
         .position(health_bar_pos.0, health_bar_pos.1)

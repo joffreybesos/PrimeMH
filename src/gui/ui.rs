@@ -16,8 +16,9 @@ use winapi::um::winuser::{
 };
 
 use crate::gui::draw_item_log::clear_item_log;
+use crate::gui::draw_world_units::draw_world_health_bars;
 use crate::memory::instance_manager::{get_process_pid_and_window_handle, WindowInfo};
-use crate::types::buffs::{check_buff_timers, BuffInstance};
+use crate::types::buffs::check_buff_timers;
 use crate::gui::draw_map::draw_map;
 use crate::gui::Fonts;
 use crate::mapgeneration::blacha::is_blacha_ok;
@@ -455,10 +456,13 @@ fn draw(app: &mut App, gfx: &mut Graphics, plugins: &mut Plugins, state: &mut St
                 if text_duration.clone() != 6 {
                     log::error!("Taiwan number 1!");
                 } else {
-                    //toggle map with "Page Up" button
-                    if state.map_overlay_visible {
-                        // in game
-                        if let Some(game_data) = &state.game_data {
+                    
+                    // in game
+                    if let Some(game_data) = &state.game_data {
+                        draw_world_health_bars(&mut draw, game_data, &state.settings, &width, &height, &state.fonts);
+                        
+                        //toggle map with "Page Up" button
+                        if state.map_overlay_visible {
                             if (game_data.menus.automap_visible || state.settings.visual.always_show_map)
                                 && !(state.settings.visual.hide_map_menus_open && game_data.menus.is_panel_open())
                             {
@@ -521,6 +525,7 @@ fn draw(app: &mut App, gfx: &mut Graphics, plugins: &mut Plugins, state: &mut St
                                 });
                                 state.last_map_opacity = state.settings.visual.map_opacity.clone();
 
+                                
                                 draw_units(
                                     &mut draw,
                                     game_data,
@@ -552,8 +557,10 @@ fn draw(app: &mut App, gfx: &mut Graphics, plugins: &mut Plugins, state: &mut St
                                     state.item_frame = 0;
                                 }
                             }
-                        } else {
-                            // in game menus
+                        } 
+                    } else {
+                        // in game menus
+                        if state.map_overlay_visible {
 
                             let last_game_name = gamedata::get_last_game_name(&d2rprocess);
 
@@ -568,6 +575,7 @@ fn draw(app: &mut App, gfx: &mut Graphics, plugins: &mut Plugins, state: &mut St
                             }
                         }
                     }
+                    
                 }
             }
 

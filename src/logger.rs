@@ -8,7 +8,7 @@ pub fn configure_logging() {
     let target = Box::new(File::create("primemh.log").expect("Can't create bot agent log file"));
 
     // intercept panics and log an error for them
-    std::panic::set_hook(Box::new(|panic_info| {
+    std::panic::set_hook(Box::new(|panic_info: &std::panic::PanicHookInfo<'_>| {
         let msg = format!("{}", panic_info);
         log::error!("ERROR: {}", msg.replace("C:\\Users\\mjg99","").replace("mjg99","").replace("panicked at", ""));
     }));
