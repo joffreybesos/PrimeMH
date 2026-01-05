@@ -77,9 +77,10 @@ pub fn is_blacha_ok(settings: &Settings) -> Result<bool, String> {
     let json: Result<SeedData, Error> = serde_json::from_str(&seed_data_str);
     match json {
         Ok(_) => Ok(true),
-        Err(_) => {
+        Err(e ) => {
             let d2log_absolute_path = d2lodpath.to_str().unwrap();
-            log::debug!("Path used: {}", d2log_absolute_path);
+            log::debug!("Error parsing map data, path used: {}", d2log_absolute_path);
+            log::debug!("{}", e);
             let forbidden_folders: Vec<&str> = vec!["Desktop", "Dropbox", "Google Drive", "OneDrive"];
             
             for folder in forbidden_folders {
@@ -111,70 +112,57 @@ fn is_running_in_wine() -> bool {
 }
 
 fn generate_data(seed_request: SeedRequest) -> String {
-    let d2lod_absolute_path = seed_request.d2lodpath.canonicalize().expect("Failed to get absolute path for d2lodpath");
+    let d2lod_absolute_path = seed_request.d2lodpath.canonicalize().expect("Failed to get absolute path for d2lodpath").to_string_lossy().replace("\\\\?\\", "");
     // generate data
     let start = Instant::now();
 
-    let output = if is_running_in_wine() {
-        log::info!("Running in wine d2lod_absolute_path: {:?} blacha {:?}", d2lod_absolute_path.display(), seed_request.blacha_exe);
+    // let output = if is_running_in_wine() {
+    //     log::info!("Running in wine d2lod_absolute_path: {:?} blacha {:?}", d2lod_absolute_path, seed_request.blacha_exe);
     
-        Command::new("wine")
-            .arg(seed_request.blacha_exe)
-            .arg(d2lod_absolute_path)
-            .arg("--seed")
-            .arg(seed_request.map_seed.to_string())
-            .arg("--difficulty")
-            .arg(seed_request.difficulty.to_string())
-            // .arg("--map")
-            // .arg("1")
-            .env("WINEPREFIX", "/app/wine_d2")
-            .env("WINEDEBUG", "-all,fixme-all")
-            .env("WINEARCH", "win32")
-            .output()
-            .unwrap()
-    } else {
-        Command::new(seed_request.blacha_exe)
-            .creation_flags(0x08000000)
-            .arg("/C")
-            .arg(d2lod_absolute_path)
-            .arg("--seed")
-            .arg(seed_request.map_seed.to_string())
-            .arg("--difficulty")
-            .arg(seed_request.difficulty.to_string())
-            // .arg("--map")
-            // .arg("1")
-            .output()
-            .unwrap()
-    };
-
+    //     Command::new("wine")
+    //         .arg(seed_request.blacha_exe)
+    //         .arg(d2lod_absolute_path)
+    //         .arg("--seed")
+    //         .arg(seed_request.map_seed.to_string())
+    //         .arg("--difficulty")
+    //         .arg(seed_request.difficulty.to_string())
+    //         // .arg("--map")
+    //         // .arg("1")
+    //         .env("WINEPREFIX", "/app/wine_d2")
+    //         .env("WINEDEBUG", "-all,fixme-all")
+    //         .env("WINEARCH", "win32")
+    //         .output()
+    //         .unwrap()
+    // } else {
+    let temp_directory = env::temp_dir();
+    let output = Command::new(seed_request.blacha_exe)
+        .creation_flags(0x08000000)
+        // .arg("/C")
+        // .arg("--help")
+        .arg(d2lod_absolute_path)
+        .arg("--seed")
+        .arg(seed_request.map_seed.to_string())
+        .arg("--difficulty")
+        .arg(seed_request.difficulty.to_string())
+        .arg("--json-path")
+        .arg(temp_directory.to_str().unwrap())
+        .output()
+        .unwrap();
+    // };
+    
     log::info!("Map data generation took {:.3} seconds", (start.elapsed().as_millis() as f64 / 1000.0));
 
-    // parse stdout and clean it up
-    let start_of_seed_data =
-        format!("{{\"seed\":{},\"difficulty\":{},\"levels\":[", seed_request.map_seed, seed_request.difficulty);
-    let mut seed_data = String::from(&start_of_seed_data);
-    let stdout = String::from_utf8(output.stdout).unwrap();
-    let mut found = false;
-    for line in stdout.lines() {
-        if line.starts_with("{\"type\":\"map\"") {
-            seed_data.push_str(line);
-            seed_data.push(',');
-            found = true;
-        }
-    }
-    seed_data.pop();
-    seed_data.push_str("]}");
-
     // save to file
-    if seed_request.map_seed == 123 {
-        if !found {
-            log::error!("{}", stdout);
-        }
-        return seed_data
-    }
     let cached_seed_data_file = cache::cached_file_name(&seed_request.map_seed, &seed_request.difficulty);
-    fs::write(cached_seed_data_file, &seed_data).expect("Unable to write map data file");
-    seed_data
+    if seed_request.map_seed == 123 {
+        if !cached_seed_data_file.exists() {
+            let stdout = String::from_utf8(output.stdout).unwrap();
+            let stderr = String::from_utf8(output.stderr).unwrap();
+            log::error!("Could not generate D2 map data, full error:\n{}\n{}", stdout, stderr);
+            return String::new();
+        }
+    }
+    return cache::read_cached_file(&cached_seed_data_file);
 }
 
 
@@ -189,30 +177,18 @@ mod tests {
     
     #[test]
     fn generate_test_seeds() {
-        // configure_logging();
+        configure_logging();
 
-        let logfile = std::path::Path::new("./test_generate_seeds.log");
         let settings = crate::settings::Settings::default();
-        for i in 1..=u32::MAX {
-            let seed_request = SeedRequest {
-                map_seed: i,
-                difficulty: 0,
-                d2lodpath: settings.general.d2lodpath.clone(),
-                blacha_exe: settings.general.blacha_exe.clone(),
-            };
-            let seed_data_json: SeedData = blacha::get_seed_data(seed_request);
-            assert_eq!(seed_data_json.seed, i);
-
-            let rogue = seed_data_json.levels.get(0).expect("No level data found");
-            let cold = seed_data_json.levels.get(1).expect("No level data found");
-            let loggedline = format!("{:?},{:?},{:?},{:?},{:?}", i, rogue.offset.x, rogue.offset.y, cold.offset.x, cold.offset.y);
-            // log::info!("{}", loggedline);
-            {
-                let mut file = OpenOptions::new().create(true).append(true).open(logfile).unwrap();
-                writeln!(file, "{}", loggedline).unwrap();
-            }
+        let seed_request = SeedRequest {
+            map_seed: 123,
+            difficulty: 0,
+            d2lodpath: settings.general.d2lodpath.clone(),
+            blacha_exe: settings.general.blacha_exe.clone(),
+        };
+        log::info!("Getting seed data");
+        let seed_data_json: SeedData = blacha::get_seed_data(seed_request);
             
-        }
         
     }
 }

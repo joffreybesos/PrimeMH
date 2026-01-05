@@ -44,7 +44,7 @@ impl POI {
             pos_y: obj.y as f32,
             world_x: obj.x + offset.x,
             world_y: obj.y + offset.y,
-            class: String::from(obj.class.as_str()),
+            class: format!("{:?}", obj.category),
             label,
         }
     }
@@ -95,28 +95,28 @@ pub fn get_preset_pois(level_data: &LevelData) -> Vec<POI> {
     let mut pois: Vec<POI> = vec![];
 
     for object in &level_data.objects {
-        if object.name == "Waypoint" {
+        if object.category == "Waypoint" {
             pois.push(POI::new(object, &level_data.offset, POIType::Waypoint));
         }
 
-        if object.name == "chest" && (level_data.id == 84 || level_data.id == 85 || level_data.id == 91) {
+        if object.category == "Lootable" && (level_data.id == 84 || level_data.id == 85 || level_data.id == 91) {
             pois.push(POI::new(object, &level_data.offset, POIType::SuperChest));
         }
-        if object.name == "chest" && (level_data.id == 85 || level_data.id == 91) {
+        if object.category == "Lootable" && (level_data.id == 85 || level_data.id == 91) {
             pois.push(POI::new(object, &level_data.offset, POIType::QuestItem));
         }
-        if object.class == "chest-super" && object.id == 580 {
+        if object.category == "Super Chest" && object.id == 580 {
             pois.push(POI::new(object, &level_data.offset, POIType::SuperChest));
         }
-        if object.name == "Shrine" {
+        if object.category == "Shrine" {
             pois.push(POI::new(object, &level_data.offset, POIType::Shrine));
         }
 
-        if object.name == "Well" {
+        if object.category == "Well" {
             pois.push(POI::new(object, &level_data.offset, POIType::Well));
         }
 
-        if object.object_type == "exit" {
+        if object.unit_type == "Exit" {
             if object.is_good_exit && level_data.id == 46 {
                 pois.push(POI::new(object, &level_data.offset, POIType::GoodExit));
             } else {
@@ -126,17 +126,17 @@ pub fn get_preset_pois(level_data: &LevelData) -> Vec<POI> {
             }
         }
 
-        if object.object_type == "npc" {
+        if object.unit_type == "NPC" {
             // summoner
             if level_data.id == 74 && object.id == 250 {
                 pois.push(POI::new(object, &level_data.offset, POIType::NPCSpawn));
             }
             // izual
-            if level_data.id == 105 && object.object_type == "npc" {
+            if level_data.id == 105 && object.unit_type == "NPC" {
                 pois.push(POI::new(object, &level_data.offset, POIType::NPCSpawn));
             }
             // maggot lair 3
-            if level_data.id == 64 && object.object_type == "npc" {
+            if level_data.id == 64 && object.unit_type == "NPC" {
                 pois.push(POI::new(object, &level_data.offset, POIType::NPCSpawn));
             }
             // radament
@@ -144,7 +144,7 @@ pub fn get_preset_pois(level_data: &LevelData) -> Vec<POI> {
                 pois.push(POI::new(object, &level_data.offset, POIType::NPCSpawn));
             }
             // nihlithak is calculated by the preset NPC on the _opposite_ side of the map
-            if level_data.id == 124 && object.object_type == "npc" {
+            if level_data.id == 124 && object.unit_type == "NPC"{
                 let mut x = object.x;
                 let mut y = object.y;
                 if x == 30 && y == 208 {
@@ -187,7 +187,7 @@ pub fn get_preset_pois(level_data: &LevelData) -> Vec<POI> {
             }
         }
         //anya
-        if object.object_type == "npc" && level_data.id == 114 {
+        if object.unit_type == "NPC"&& level_data.id == 114 {
             pois.push(POI::new(object, &level_data.offset, POIType::QuestItem));
         }
     }

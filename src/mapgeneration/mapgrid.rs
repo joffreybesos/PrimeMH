@@ -71,9 +71,9 @@ pub fn level_data_to_walkable(level_data: &LevelData) -> MapGrid {
             if index == last_idx && fill {
                 // fix end of row
                 let extra_width = lvl_width.wrapping_sub(x).wrapping_sub(1);
-                for num in 0..extra_width {
-                    map_grid[y][num + x] = true;
-                }
+                // for num in 0..extra_width {
+                //     map_grid[y][num + x] = true;
+                // }
             }
         }
     }

@@ -6,7 +6,7 @@ pub fn get_walkable_exits(seed_data_json: &mut SeedData) {
     // I hate that i have to do this
     seed_data_json.levels.iter_mut().for_each(|o| {
         o.objects.iter_mut().for_each(|e| {
-            if e.object_type == "exit" {
+            if e.unit_type == "Exit" {
                 e.x += o.offset.x;
                 e.y += o.offset.y;
             }
@@ -33,7 +33,7 @@ pub fn get_walkable_exits(seed_data_json: &mut SeedData) {
 
     seed_data_json.levels.iter_mut().for_each(|o| {
         o.objects.iter_mut().for_each(|e| {
-            if e.object_type == "exit" {
+            if e.unit_type == "Exit" {
                 e.x -= o.offset.x;
                 e.y -= o.offset.y;
             }

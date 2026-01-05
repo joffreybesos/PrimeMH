@@ -16,8 +16,6 @@ pub struct SeedData {
 
 #[derive(Serialize, Default, Deserialize, Debug)]
 pub struct LevelData {
-    #[serde(alias = "type")]
-    pub level_type: String,
     pub id: u32,
     #[serde(skip)]
     pub name: LevelName,
@@ -57,16 +55,12 @@ pub struct Size {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Object {
     pub id: u32,
-    #[serde(alias = "type")]
-    pub object_type: String,
+    pub unit_type: String,
     pub x: u32,
     pub y: u32,
     #[serde(default)]
     pub name: String,
-    #[serde(default)]
-    pub class: String,
-    #[serde(default)]
-    pub op: u32,
+    pub category: String,
     #[serde(alias = "isGoodExit")]
     #[serde(default)]
     pub is_good_exit: bool,
@@ -74,16 +68,16 @@ pub struct Object {
     pub owned_level_id: u32,
 }
 
+
 impl Object {
     pub fn new_npc(x: u32, y: u32, id: u32) -> Object {
         Object {
             id,
-            object_type: "npc".to_owned(),
+            unit_type: String::from("NPC"),
             x,
             y,
             name: "".to_owned(),
-            op: 0,
-            class: "".to_owned(),
+            category: String::new(),
             is_good_exit: false,
             owned_level_id: 0,
         }
@@ -107,12 +101,11 @@ impl Object {
 
         Object {
             id: new_exit_id,
-            object_type: "exit".to_owned(),
+            unit_type: String::from("Exit"),
             x,
             y,
             name: "".to_owned(),
-            op: 0,
-            class: "walkable".to_owned(),
+            category: String::from("Exit"),
             is_good_exit: false,
             owned_level_id,
         }

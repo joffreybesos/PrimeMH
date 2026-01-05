@@ -1,6 +1,6 @@
 [package]
 name = "PrimeMH"
-version = "0.4.6"
+version = "0.4.7"
 edition = "2021"
 
 [profile.release]
@@ -37,8 +37,8 @@ syn = { version = "1.0.102", features = ["full", "extra-traits"] }
 log = "0.4.0"
 env_logger = "0.10.0"
 # notan = { git = "https://github.com/joffreybesos/notan", branch = "rusty", features = ["extra", "egui", "text"] }
-notan = {version = "0.13.0", features = ["extra", "egui", "text"] }
-# notan = { path ="E:/Dev/notan", features = ["extra", "egui", "text"] }
+# notan = {version = "0.13.0", features = ["extra", "egui", "text"] }
+notan = { path ="E:/Dev/joffreybesos/notan", features = ["extra", "egui", "text"] }
 locale_config = "0.3.0"
 device_query = "2.1.0"
 
