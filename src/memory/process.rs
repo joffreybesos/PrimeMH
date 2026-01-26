@@ -41,7 +41,6 @@ pub struct D2RInstance {
 pub struct Offsets {
     pub unit_table: u64,
     pub ui_offset: u64,
-    pub expansion: u64,
     pub last_game_name: u64,
     pub hover: u64,
     pub roster: u64,
@@ -447,11 +446,6 @@ impl D2RInstance {
         // let ui_offset = 0x1DA57DA;
         log::debug!("UI offset 0x{:02x}", ui_offset);
     
-        let pattern = String::from("48 8B 05 ? ? ? ? 48 8B D9 F3 0F 10 50 ?");
-        let expansion = Self::scan_pattern("Expansion", pid, pattern, 3, 7);
-        // let expansion = 0x1CE78D0;
-        log::debug!("Exp offset 0x{:02x}", expansion);
-    
         let pattern = String::from("C6 84 C2 ? ? ? ? ? 48 8B 74 24 ?");
         let hover = Self::scan_pattern("Hover", pid, pattern, 3, 0) - 1;
         // let hover = 0x1CE8400;
@@ -475,7 +469,6 @@ impl D2RInstance {
         Offsets {
             unit_table: unit_table as u64,
             ui_offset: (ui_offset - 0xA) as u64,
-            expansion: expansion as u64,
             last_game_name: 0x24D5A90,
             hover: hover as u64,
             roster: roster as u64,
