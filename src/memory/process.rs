@@ -2,17 +2,24 @@ use std::backtrace::{Backtrace, BacktraceStatus};
 use std::fmt::Debug;
 use std::mem::{size_of_val, MaybeUninit};
 use std::any::type_name;
-use proc_mem::ProcMemError;
+use std::ptr;
+use std::mem;
 use winapi;
-use winapi::shared::minwindef::{DWORD, FALSE, HMODULE, LPVOID, MAX_PATH, TRUE};
-use winapi::shared::ntdef::HANDLE;
+use winapi::shared::minwindef::{DWORD, FALSE, HMODULE, LPCVOID, LPVOID, MAX_PATH, TRUE};
 use winapi::shared::ntdef::NULL;
 use winapi::shared::windef::{HWND, POINT, RECT};
 use winapi::um::handleapi::CloseHandle;
 use winapi::um::memoryapi::WriteProcessMemory;
-use winapi::um::psapi::{EnumProcessModules, GetModuleBaseNameA};
 use winapi::um::winuser::{ClientToScreen, GetClientRect, GetDpiForWindow, GetForegroundWindow};
 use winapi::um::{processthreadsapi::OpenProcess, winnt::PROCESS_ALL_ACCESS};
+
+
+use winapi::um::memoryapi::{ReadProcessMemory, VirtualQueryEx};
+use winapi::um::psapi::{EnumProcessModules, EnumProcessModulesEx, GetModuleBaseNameA, GetModuleBaseNameW, GetModuleInformation, LIST_MODULES_ALL, MODULEINFO};
+use winapi::um::winnt::{
+    HANDLE, MEMORY_BASIC_INFORMATION, MEM_COMMIT, MEM_IMAGE, MEM_MAPPED, MEM_PRIVATE,
+    PAGE_GUARD, PAGE_NOACCESS, PROCESS_QUERY_INFORMATION, PROCESS_VM_READ,
+};
 
 use crate::types::buffs::BuffInstance;
 use crate::LOCALISATION;
@@ -163,50 +170,275 @@ impl D2RInstance {
         }
     }
 
-    
-    fn scan_pattern(pattern_name: &str, pid: u32, pattern: String, extra_bytes: i32, extra_bytes2: i32) -> u32 {
-        use proc_mem::{Process, Signature};
+    fn scan_pattern(
+        pattern_name: &str,
+        pid: u32,
+        pattern: String,
+        extra_bytes: i32,
+        extra_bytes2: i32,
+    ) -> u32 {
+        // Parse the pattern string into bytes and mask
+        let (pattern_bytes, mask) = Self::parse_pattern(&pattern);
         
-        let some_game = Process::with_pid(pid);
-        let game = match some_game {
-            Ok(s) => s,
-            Err(err) => {
-                let localisation = LOCALISATION.lock().unwrap();
-                let msg = format!("{} PID {}\n{:?}", localisation.get_primemh("error13"), pid, err);
-                log::error!("{}", msg);
+        // Open the process
+        let process_handle: HANDLE = unsafe {
+            OpenProcess(
+                PROCESS_QUERY_INFORMATION | PROCESS_VM_READ,
+                FALSE,
+                pid,
+            )
+        };
+        
+        if process_handle.is_null() {
+            log::error!("Failed to open process PID {}", pid);
+            return 0;
+        }
+        
+        // Get module info for D2R.exe
+        let module_info = match Self::get_module_info(process_handle, "D2R.exe") {
+            Some(info) => info,
+            None => {
+                log::error!("Failed to get module info for D2R.exe");
+                unsafe { CloseHandle(process_handle); }
                 return 0;
-            },
+            }
         };
-        let module = game.module("D2R.exe").unwrap();
-        let lp_signature = Signature {
-            name: "LocalPlayer".to_owned(),
-            pattern,
-            offsets: vec![],
-            extra: 0,
-            relative: false,
-            rip_relative: false,
-            rip_offset: 0,
-        };
-        let lp_address: Result<usize, ProcMemError> = module.find_signature(&lp_signature);
-        let offset_address = match lp_address {
-            Ok(a) => a,
-            Err(err) => {
-                panic!("Did not find {} signature: {:?}\nFatal error", pattern_name, err);
-            },
-        };
-        let extra_bytes_address = offset_address as isize + extra_bytes as isize;
-        let offset = game.read_mem(extra_bytes_address as usize).unwrap();
-        if extra_bytes2 > 0 {
-            return ((offset_address - game.process_base_address) + extra_bytes2 as usize + offset as usize) as u32;
-        } else {
-            return offset;
+        
+        let base_address = module_info.lpBaseOfDll as usize;
+        let end_address = base_address + module_info.SizeOfImage as usize;
+        
+        // Scan memory regions
+        let result = Self::scan_memory_regions(
+            process_handle,
+            base_address,
+            end_address,
+            &pattern_bytes,
+            &mask,
+        );
+        
+        match result {
+            Some(offset_address) => {
+                // Read the offset value at the found address + extra_bytes
+                let extra_bytes_address = offset_address as isize + extra_bytes as isize;
+                let offset: u32 = match Self::read_memory(process_handle, extra_bytes_address as usize) {
+                    Some(v) => v,
+                    None => {
+                        log::error!("Failed to read memory at offset address");
+                        unsafe { CloseHandle(process_handle); }
+                        return 0;
+                    }
+                };
+                
+                unsafe { CloseHandle(process_handle); }
+                
+                if extra_bytes2 > 0 {
+                    ((offset_address - base_address) + extra_bytes2 as usize + offset as usize) as u32
+                } else {
+                    offset
+                }
+            }
+            None => {
+                unsafe { CloseHandle(process_handle); }
+                panic!("Did not find {} signature\nFatal error", pattern_name);
+            }
         }
     }
 
+    /// Parse a pattern string like "48 03 C7 49 8B 8C C6" into bytes and mask
+    /// Use "??" or "?" for wildcard bytes
+    fn parse_pattern(pattern: &str) -> (Vec<u8>, Vec<bool>) {
+        let parts: Vec<&str> = pattern.split_whitespace().collect();
+        let mut bytes = Vec::with_capacity(parts.len());
+        let mut mask = Vec::with_capacity(parts.len());
+        
+        for part in parts {
+            if part == "?" || part == "??" {
+                bytes.push(0);
+                mask.push(false); // false = wildcard, don't match
+            } else {
+                bytes.push(u8::from_str_radix(part, 16).unwrap_or(0));
+                mask.push(true); // true = must match
+            }
+        }
+        
+        (bytes, mask)
+    }
+
+    /// Get module information for a specific module
+    fn get_module_info(process_handle: HANDLE, module_name: &str) -> Option<MODULEINFO> {
+        const MAX_MODULES: usize = 1024;
+        let mut modules: [HMODULE; MAX_MODULES] = [ptr::null_mut(); MAX_MODULES];
+        let mut cb_needed: DWORD = 0;
+        
+        unsafe {
+            let result = EnumProcessModulesEx(
+                process_handle,
+                modules.as_mut_ptr(),
+                (MAX_MODULES * mem::size_of::<HMODULE>()) as DWORD,
+                &mut cb_needed,
+                LIST_MODULES_ALL,
+            );
+            
+            if result == FALSE {
+                return None;
+            }
+            
+            let module_count = cb_needed as usize / mem::size_of::<HMODULE>();
+            
+            for i in 0..module_count {
+                let mut name_buf = [0u16; MAX_PATH];
+                let len = GetModuleBaseNameW(
+                    process_handle,
+                    modules[i],
+                    name_buf.as_mut_ptr(),
+                    MAX_PATH as DWORD,
+                );
+                
+                if len > 0 {
+                    let name = String::from_utf16_lossy(&name_buf[..len as usize]);
+                    if name.eq_ignore_ascii_case(module_name) {
+                        let mut mod_info: MODULEINFO = mem::zeroed();
+                        let result = GetModuleInformation(
+                            process_handle,
+                            modules[i],
+                            &mut mod_info,
+                            mem::size_of::<MODULEINFO>() as DWORD,
+                        );
+                        
+                        if result != FALSE {
+                            return Some(mod_info);
+                        }
+                    }
+                }
+            }
+        }
+        
+        None
+    }
+
+    /// Scan memory regions using VirtualQueryEx
+    fn scan_memory_regions(
+        process_handle: HANDLE,
+        start_address: usize,
+        end_address: usize,
+        pattern: &[u8],
+        mask: &[bool],
+    ) -> Option<usize> {
+        let mut address = start_address;
+        let pattern_size = pattern.len();
+        
+        while address < end_address {
+            let mut mem_info: MEMORY_BASIC_INFORMATION = unsafe { mem::zeroed() };
+            
+            let result = unsafe {
+                VirtualQueryEx(
+                    process_handle,
+                    address as LPCVOID,
+                    &mut mem_info,
+                    mem::size_of::<MEMORY_BASIC_INFORMATION>(),
+                )
+            };
+            
+            if result == 0 {
+                break;
+            }
+            
+            let region_size = mem_info.RegionSize;
+            let region_base = mem_info.BaseAddress as usize;
+            
+            // Check if this region is readable and suitable for scanning
+            let is_committed = mem_info.State == MEM_COMMIT;
+            let is_readable = (mem_info.Protect & (PAGE_NOACCESS | PAGE_GUARD)) == 0;
+            let is_scannable_type = mem_info.Type == MEM_MAPPED 
+                || mem_info.Type == MEM_PRIVATE
+                || mem_info.Type == MEM_IMAGE;
+            
+            if is_committed && is_readable && is_scannable_type && region_size >= pattern_size {
+                // Read the entire region
+                if let Some(buffer) = Self::read_region(process_handle, region_base, region_size) {
+                    // Scan for pattern in this region
+                    if let Some(offset) = Self::pattern_scan(&buffer, pattern, mask) {
+                        return Some(region_base + offset);
+                    }
+                }
+            }
+            
+            // Move to next region
+            address = region_base + region_size;
+        }
+        
+        None
+    }
+
+    /// Read a memory region into a buffer
+    fn read_region(process_handle: HANDLE, address: usize, size: usize) -> Option<Vec<u8>> {
+        let mut buffer = vec![0u8; size];
+        let mut bytes_read: usize = 0;
+        
+        let result = unsafe {
+            ReadProcessMemory(
+                process_handle,
+                address as LPCVOID,
+                buffer.as_mut_ptr() as LPVOID,
+                size,
+                &mut bytes_read,
+            )
+        };
+        
+        if result != FALSE && bytes_read > 0 {
+            buffer.truncate(bytes_read);
+            Some(buffer)
+        } else {
+            None
+        }
+    }
+
+    /// Read a value from memory
+    fn read_memory<T: Copy>(process_handle: HANDLE, address: usize) -> Option<T> {
+        let mut value: T = unsafe { mem::zeroed() };
+        let mut bytes_read: usize = 0;
+        
+        let result = unsafe {
+            ReadProcessMemory(
+                process_handle,
+                address as LPCVOID,
+                &mut value as *mut T as LPVOID,
+                mem::size_of::<T>(),
+                &mut bytes_read,
+            )
+        };
+        
+        if result != FALSE && bytes_read == mem::size_of::<T>() {
+            Some(value)
+        } else {
+            None
+        }
+    }
+
+    /// Scan a buffer for a pattern with mask
+    fn pattern_scan(buffer: &[u8], pattern: &[u8], mask: &[bool]) -> Option<usize> {
+        if buffer.len() < pattern.len() {
+            return None;
+        }
+        
+        let max_offset = buffer.len() - pattern.len();
+        
+        'outer: for i in 0..=max_offset {
+            for j in 0..pattern.len() {
+                // If mask is true, byte must match; if false, it's a wildcard
+                if mask[j] && buffer[i + j] != pattern[j] {
+                    continue 'outer;
+                }
+            }
+            return Some(i);
+        }
+        
+        None
+    }
     pub fn find_offsets(pid: u32) -> Offsets {
 
         let pattern = String::from("48 03 C7 49 8B 8C C6");
-        let unit_table = Self::scan_pattern("Unit table", pid, pattern, 7, 0);
+        let unit_table: u32 = Self::scan_pattern("Unit table", pid, pattern, 7, 0);
         // let unit_table = 0x1D95AF0;
         log::debug!("Unit offset 0x{:02x}", unit_table);
     
