@@ -20,7 +20,14 @@ pub struct GameData {
 }
 
 impl GameData {
-    pub fn read_game_memory(d2rprocess: &D2RInstance) -> Option<GameData> {
+    pub fn read_game_memory(d2rprocess: &mut D2RInstance) -> Option<GameData> {
+        // let offsets = d2rprocess.offsets.clone();
+        if d2rprocess.offsets.unit_table == 0 {
+            d2rprocess.refresh_offsets();
+        }
+        if d2rprocess.offsets.unit_table == 0 {
+            return None;
+        }
         let unit_ptrs: UnitHashTable = d2rprocess.read_mem_offset::<UnitHashTable>(d2rprocess.offsets.unit_table);
         let players: Vec<PlayerUnit> = get_units(d2rprocess, unit_ptrs.player_ptrs);
         if players.is_empty() {

@@ -222,7 +222,7 @@ impl D2RInstance {
                 let offset: u32 = match Self::read_memory(process_handle, extra_bytes_address as usize) {
                     Some(v) => v,
                     None => {
-                        log::error!("Failed to read memory at offset address");
+                        log::error!("Failed to read memory at offset address {}", pattern_name);
                         unsafe { CloseHandle(process_handle); }
                         return 0;
                     }
@@ -238,7 +238,8 @@ impl D2RInstance {
             }
             None => {
                 unsafe { CloseHandle(process_handle); }
-                panic!("Did not find {} signature\nFatal error", pattern_name);
+                return 0;
+                // panic!("Did not find {} signature\nFatal error", pattern_name);
             }
         }
     }
@@ -434,47 +435,95 @@ impl D2RInstance {
         
         None
     }
-    pub fn find_offsets(pid: u32) -> Offsets {
 
+    pub fn refresh_offsets(&mut self) {
+        if self.offsets.unit_table == 0 {
+            self.offsets.unit_table = Self::find_unit_table_offset(self.window.pid);
+        }
+        if self.offsets.ui_offset == 0 {
+            self.offsets.ui_offset = Self::find_ui_offset(self.window.pid);
+        }
+        if self.offsets.hover == 0 {
+            self.offsets.hover = Self::find_hover_offset(self.window.pid);
+        }
+        if self.offsets.roster == 0 {
+            self.offsets.roster = Self::find_roster_offset(self.window.pid);
+        }
+        if self.offsets.panels == 0 {
+            self.offsets.panels = Self::find_panels_offset(self.window.pid);
+        }
+        if self.offsets.keybindings == 0 {
+            self.offsets.keybindings = Self::find_keybindings_offset(self.window.pid);
+        }
+    }
+    
+    pub fn find_offsets(pid: u32) -> Offsets {
+        let mut offsets = Offsets {
+            unit_table: 0,
+            ui_offset: 0,
+            last_game_name: 0x24D5A90,
+            hover: 0,
+            roster: 0,
+            panels: 0,
+            keybindings: 0,
+        };
+
+        offsets.unit_table = Self::find_unit_table_offset(pid);
+        offsets.ui_offset = Self::find_ui_offset(pid);
+        offsets.hover = Self::find_hover_offset(pid);
+        offsets.roster = Self::find_roster_offset(pid);
+        offsets.panels = Self::find_panels_offset(pid);
+        offsets.keybindings = Self::find_keybindings_offset(pid);
+
+        offsets
+    }
+
+    fn find_unit_table_offset(pid: u32) -> u64 {
         let pattern = String::from("48 03 C7 49 8B 8C C6");
         let unit_table: u32 = Self::scan_pattern("Unit table", pid, pattern, 7, 0);
-        // let unit_table = 0x1D95AF0;
         log::debug!("Unit offset 0x{:02x}", unit_table);
-    
+        unit_table as u64
+    }
+
+    fn find_ui_offset(pid: u32) -> u64 {
         let pattern = String::from("40 84 ed 0f 94 05 4b");
-        let ui_offset = Self::scan_pattern("UI offset", pid, pattern, 6, 10) - 10;
-        // let ui_offset = 0x1DA57DA;
+        let mut ui_offset = Self::scan_pattern("UI offset", pid, pattern, 6, 10);
+        if ui_offset > 0 {
+            ui_offset = ui_offset - 10 - 0xA;
+        }
         log::debug!("UI offset 0x{:02x}", ui_offset);
-    
+        ui_offset as u64
+    }
+
+    fn find_hover_offset(pid: u32) -> u64 {
         let pattern = String::from("C6 84 C2 ? ? ? ? ? 48 8B 74 24 ?");
-        let hover = Self::scan_pattern("Hover", pid, pattern, 3, 0) - 1;
-        // let hover = 0x1CE8400;
+        let mut hover = Self::scan_pattern("Hover", pid, pattern, 3, 0);
+        if hover > 0 {
+            hover = hover - 1;
+        }
         log::debug!("Hover offset 0x{:02x}", hover);
-    
+        hover as u64
+    }
+
+    fn find_roster_offset(pid: u32) -> u64 {
         let pattern = String::from("?? 45 33 D2 4D 8B");
         let roster = Self::scan_pattern("Roster", pid, pattern, -3, 1);
-        // let roster = 0x1DABD60;
         log::debug!("Roster offset 0x{:02x}", roster);
-    
+        roster as u64
+    }
+
+    fn find_panels_offset(pid: u32) -> u64 {
         let pattern = String::from("48 89 05 ? ? ? ? 48 85 DB 74 1E");
         let panels = Self::scan_pattern("Panels", pid, pattern, 3, 7);
-        // let panels = 0x1D00968;
         log::debug!("Panel offset 0x{:02x}", panels);
+        panels as u64
+    }
 
+    fn find_keybindings_offset(pid: u32) -> u64 {
         let pattern = String::from("02 00 00 00 ? ? 00 00 00 00 03 00 00 00 ? ? 01 00 00 00");
-        let keybindings = Self::scan_pattern("Keybindings", pid, pattern, 0, 0x158C);
-        // let keybindings = 0x18C2894;
+        let keybindings = Self::scan_pattern("Keybindings", pid, pattern, 0, 0x15D2);
         log::debug!("Keybindings offset 0x{:02x}", keybindings);
-        
-        Offsets {
-            unit_table: unit_table as u64,
-            ui_offset: (ui_offset - 0xA) as u64,
-            last_game_name: 0x24D5A90,
-            hover: hover as u64,
-            roster: roster as u64,
-            panels: panels as u64,
-            keybindings: keybindings as u64,
-        }
+        keybindings as u64
     }
 
     pub fn read_mem_offset<T: Default + Debug>(&self, offset: u64) -> T {
